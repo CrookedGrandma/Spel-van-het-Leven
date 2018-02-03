@@ -13,7 +13,7 @@ namespace Template {
     class Game {
         public static int screenWidth, screenHeight;
         // when GLInterop is set to true, the fractal is rendered directly to an OpenGL texture
-        bool GLInterop = false;
+        bool GLInterop = true;
         // load the OpenCL program; this creates the OpenCL context
         static OpenCLProgram ocl = new OpenCLProgram("../../program.cl");
         // find the kernel named 'device_function' in the program
@@ -26,7 +26,6 @@ namespace Template {
         OpenCLBuffer<uint> teken = new OpenCLBuffer<uint>(ocl, screenWidth * screenHeight);
         // create an OpenGL texture to which OpenCL can send data
         OpenCLImage<int> image = new OpenCLImage<int>(ocl, screenWidth, screenHeight);
-        OpenCLImage<int> image2 = new OpenCLImage<int>(ocl, screenWidth, screenHeight);
         public Surface screen;
         Stopwatch timer = new Stopwatch();
         uint pw, ph;
@@ -88,6 +87,22 @@ namespace Template {
             }
             patternB = new OpenCLBuffer<uint>(ocl, pattern);
             secondB = new OpenCLBuffer<uint>(ocl, second);
+            if (GLInterop) {
+                //ARGS
+                kernel.SetArgument(0, image);
+                kernel.SetArgument(1, patternB);
+                kernel.SetArgument(2, secondB);
+                swapper.SetArgument(0, patternB);
+                swapper.SetArgument(1, secondB);
+            }
+            kernel.SetArgument(3, pw);
+            kernel.SetArgument(4, ph);
+            kernel.SetArgument(5, screenWidth);
+            kernel.SetArgument(6, screenHeight);
+            swapper.SetArgument(2, pw);
+            swapper.SetArgument(3, ph);
+            swapper.SetArgument(4, screenWidth);
+            swapper.SetArgument(5, screenHeight);
         }
         public void Tick() {
             // start timer
@@ -96,33 +111,17 @@ namespace Template {
             // clear the screen
             screen.Clear(0);
             // do opencl stuff
-            if (GLInterop) {
-                /*kernel.SetArgument(0, image);
-                kernel.SetArgument(1, image2);
-                kernel.SetArgument(2, pw);
-                kernel.SetArgument(3, ph);*/
-            }
-            else {
-                patternB.CopyFromDevice();
-                secondB.CopyFromDevice();
+            if (!GLInterop) {
                 kernel.SetArgument(0, patternB);
                 kernel.SetArgument(1, secondB);
                 kernel.SetArgument(2, teken);
-                kernel.SetArgument(3, pw);
-                kernel.SetArgument(4, ph);
-                kernel.SetArgument(5, screenWidth);
-                kernel.SetArgument(6, screenHeight);
-                kernel.SetArgument(7, xoffset);
-                kernel.SetArgument(8, yoffset);
                 swapper.SetArgument(0, patternB);
                 swapper.SetArgument(1, secondB);
-                swapper.SetArgument(2, pw);
-                swapper.SetArgument(3, ph);
-                swapper.SetArgument(4, screenWidth);
-                swapper.SetArgument(5, screenHeight);
-                swapper.SetArgument(6, xoffset);
-                swapper.SetArgument(7, yoffset);
             }
+            kernel.SetArgument(7, xoffset);
+            kernel.SetArgument(8, yoffset);
+            swapper.SetArgument(6, xoffset);
+            swapper.SetArgument(7, yoffset);
             // execute kernel
             long[] workSize = { pw * 32, ph };
             long[] localSize = { 32, 4 };
@@ -134,7 +133,10 @@ namespace Template {
                 // lock the OpenGL texture for use by OpenCL
                 kernel.LockOpenGLObject(image.texBuffer);
                 // execute the kernel
-                kernel.Execute(workSize, localSize);
+                kernel.Execute(workSize, null);
+                kernel.StopMaar();
+                swapper.Execute(workSize, null);
+                swapper.StopMaar();
                 // unlock the OpenGL texture so it can be used for drawing a quad
                 kernel.UnlockOpenGLObject(image.texBuffer);
             }
@@ -148,6 +150,7 @@ namespace Template {
                 kernel.Execute(workSize, null );
                 kernel.StopMaar();
                 swapper.Execute(workSize, null );
+                swapper.StopMaar();
                 //swapper.StopMaar();
                 // get the data from the device to the host
                 teken.CopyFromDevice();
@@ -159,8 +162,7 @@ namespace Template {
                 }
             }
             // report performance
-            //Console.WriteLine("generation " + generation++ + ": " + timer.ElapsedMilliseconds + "ms");
-            Console.WriteLine("xoffset: " + xoffset);
+            Console.WriteLine("generation " + generation++ + ": " + timer.ElapsedMilliseconds + "ms");
         }
         public void Render() {
             // use OpenGL to draw a quad using the texture that was filled by OpenCL
