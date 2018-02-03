@@ -17,9 +17,8 @@ __kernel void device_function( __global uint* pattern, __global uint* second, __
 #endif
 {
 	// adapted from inigo quilez - iq/2013
-	uint idx = get_global_id( 0 ) + xoffset;
-	uint idy = get_global_id( 1 ) + yoffset;
-	uint id = idx + sWidth * idy;
+	uint idx = get_global_id( 0 );
+	uint idy = get_global_id( 1 );
 	atomic_and(&pattern[pw * idy + (idx >> 5)], ~(1U << (idx & 31)));
 	
 	// count active neighbors
@@ -29,7 +28,7 @@ __kernel void device_function( __global uint* pattern, __global uint* second, __
 		if ((GetBit( second, pw, idx, idy ) == 1 && n == 2) || n == 3) { BitSet( pattern, pw, idx, idy ); }
 	}
 	
-	if (idx >= sWidth + xoffset || idy >= sHeight + yoffset) return;
+	if (idx < xoffset || idx >= sWidth + xoffset || idy < yoffset || idy >= sHeight + yoffset) return;
 	float3 col;
 	if (GetBit( second, pw, idx, idy )){
 		col = (float3)( 16.f, 16.f, 16.f );
@@ -45,13 +44,18 @@ __kernel void device_function( __global uint* pattern, __global uint* second, __
 	int r = (int)clamp( 16.0f * col.x, 0.f, 255.f );
 	int g = (int)clamp( 16.0f * col.y, 0.f, 255.f );
 	int b = (int)clamp( 16.0f * col.z, 0.f, 255.f );
+	
+	idx -= xoffset;
+	idy -= yoffset;
+	uint id = idx + sWidth * idy;
+	
 	teken[id] = (r << 16) + (g << 8) + b;
 #endif
 }
 
-__kernel void ruiltransactie( __global uint* pattern, __global uint* second, uint pw, uint ph, int sWidth, int sHeight ) {
-	uint idx = get_global_id( 0 );
-	uint idy = get_global_id( 1 );
+__kernel void ruiltransactie( __global uint* pattern, __global uint* second, uint pw, uint ph, int sWidth, int sHeight, uint xoffset, uint yoffset ) {
+	uint idx = get_global_id( 0 );// + xoffset;
+	uint idy = get_global_id( 1 );// + yoffset;
 	uint oldVal = GetBit(pattern, pw, idx, idy) << (idx & 31);
 	uint i = pw * idy + (idx >> 5);
 	atomic_and(&second[i], ~(1U << (idx & 31)));

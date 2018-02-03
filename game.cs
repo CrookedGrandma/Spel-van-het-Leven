@@ -97,10 +97,10 @@ namespace Template {
             screen.Clear(0);
             // do opencl stuff
             if (GLInterop) {
-                kernel.SetArgument(0, image);
+                /*kernel.SetArgument(0, image);
                 kernel.SetArgument(1, image2);
                 kernel.SetArgument(2, pw);
-                kernel.SetArgument(3, ph);
+                kernel.SetArgument(3, ph);*/
             }
             else {
                 patternB.CopyFromDevice();
@@ -120,6 +120,8 @@ namespace Template {
                 swapper.SetArgument(3, ph);
                 swapper.SetArgument(4, screenWidth);
                 swapper.SetArgument(5, screenHeight);
+                swapper.SetArgument(6, xoffset);
+                swapper.SetArgument(7, yoffset);
             }
             // execute kernel
             long[] workSize = { pw * 32, ph };
@@ -157,7 +159,8 @@ namespace Template {
                 }
             }
             // report performance
-            Console.WriteLine("generation " + generation++ + ": " + timer.ElapsedMilliseconds + "ms");
+            //Console.WriteLine("generation " + generation++ + ": " + timer.ElapsedMilliseconds + "ms");
+            Console.WriteLine("xoffset: " + xoffset);
         }
         public void Render() {
             // use OpenGL to draw a quad using the texture that was filled by OpenCL
