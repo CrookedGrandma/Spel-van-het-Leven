@@ -1,11 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Threading.Tasks;
-using System.Runtime.InteropServices;
 using System.IO;
-using Cloo;
-using OpenTK.Graphics;
 using OpenTK.Graphics.OpenGL;
 
 namespace Template {
@@ -16,13 +11,15 @@ namespace Template {
         bool GLInterop = true;
         // load the OpenCL program; this creates the OpenCL context
         static OpenCLProgram ocl = new OpenCLProgram("../../program.cl");
-        // find the kernel named 'device_function' in the program
+        // find the two kernels in the program
         OpenCLKernel kernel = new OpenCLKernel(ocl, "device_function");
         OpenCLKernel swapper = new OpenCLKernel(ocl, "ruiltransactie");
+        // initialize two uint arrays
         uint[] pattern, second;
-        // create a regular buffer; by default this resides on both the host and the device
+        // initialize the two buffers for simple existance of bits
         OpenCLBuffer<uint> patternB;
         OpenCLBuffer<uint> secondB;
+        // create the buffer used for drawing
         OpenCLBuffer<uint> teken = new OpenCLBuffer<uint>(ocl, screenWidth * screenHeight);
         // create an OpenGL texture to which OpenCL can send data
         OpenCLImage<int> image = new OpenCLImage<int>(ocl, screenWidth, screenHeight);
@@ -34,7 +31,7 @@ namespace Template {
         // helper function for setting one bit in the pattern buffer
         void BitSet(uint x, uint y) { second[(int)(y * pw + (x >> 5))] |= 1U << (int)(x & 31); }
 
-        // mouse handling: dragging functionality
+        // mouse handling: dragging functionality (copied from Game of Life C# code)
         uint xoffset = 0, yoffset = 0;
         bool lastLButtonState = false;
         int dragXStart, dragYStart, offsetXStart, offsetYStart;
@@ -55,8 +52,7 @@ namespace Template {
             }
             else lastLButtonState = false;
         }
-
-        // minimalistic .rle file reader for Golly files (see http://golly.sourceforge.net)
+        
         public void Init() {
             StreamReader sr = new StreamReader("../../data/turing_js_r.rle");
             uint state = 0, n = 0, x = 0, y = 0;
@@ -64,7 +60,7 @@ namespace Template {
                 String line = sr.ReadLine();
                 if (line == null) break; // end of file
                 int pos = 0;
-                if (line[pos] == '#') continue; /* comment line */
+                if (line[pos] == '#') continue; // comment line
                 else if (line[pos] == 'x') { // header
                     String[] sub = line.Split(new char[] { '=', ',' }, StringSplitOptions.RemoveEmptyEntries);
                     pw = (UInt32.Parse(sub[1]) + 31) / 32;
@@ -85,25 +81,26 @@ namespace Template {
                     }
                 }
             }
+            // assign values to the initialized buffers
             patternB = new OpenCLBuffer<uint>(ocl, pattern);
             secondB = new OpenCLBuffer<uint>(ocl, second);
             if (GLInterop) {
-                //ARGS
+                // pass on the arguments only needed in Init() because of GLInterop
                 kernel.SetArgument(0, image);
                 kernel.SetArgument(1, patternB);
                 kernel.SetArgument(2, secondB);
                 swapper.SetArgument(0, patternB);
                 swapper.SetArgument(1, secondB);
             }
+            // pass on the arguments that are only needed once
             kernel.SetArgument(3, pw);
             kernel.SetArgument(4, ph);
             kernel.SetArgument(5, screenWidth);
             kernel.SetArgument(6, screenHeight);
             swapper.SetArgument(2, pw);
             swapper.SetArgument(3, ph);
-            swapper.SetArgument(4, screenWidth);
-            swapper.SetArgument(5, screenHeight);
         }
+
         public void Tick() {
             // start timer
             timer.Restart();
@@ -112,16 +109,16 @@ namespace Template {
             screen.Clear(0);
             // do opencl stuff
             if (!GLInterop) {
+                // pass on the buffers
                 kernel.SetArgument(0, patternB);
                 kernel.SetArgument(1, secondB);
                 kernel.SetArgument(2, teken);
                 swapper.SetArgument(0, patternB);
                 swapper.SetArgument(1, secondB);
             }
+            // pass on the offsets that constantly change
             kernel.SetArgument(7, xoffset);
             kernel.SetArgument(8, yoffset);
-            swapper.SetArgument(6, xoffset);
-            swapper.SetArgument(7, yoffset);
             // execute kernel
             long[] workSize = { pw * 32, ph };
             long[] localSize = { 32, 4 };
@@ -135,6 +132,7 @@ namespace Template {
                 // execute the kernel
                 kernel.Execute(workSize, null);
                 kernel.StopMaar();
+                // execute the kernel which swaps the buffers
                 swapper.Execute(workSize, null);
                 swapper.StopMaar();
                 // unlock the OpenGL texture so it can be used for drawing a quad
@@ -149,6 +147,7 @@ namespace Template {
                 // execute the kernel
                 kernel.Execute(workSize, null );
                 kernel.StopMaar();
+                // execute the kernel which swaps the buffers
                 swapper.Execute(workSize, null );
                 swapper.StopMaar();
                 //swapper.StopMaar();
