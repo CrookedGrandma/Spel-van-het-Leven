@@ -25,6 +25,8 @@ namespace Template {
             GL.Hint(HintTarget.PerspectiveCorrectionHint, HintMode.Nicest);
             Width = 600;
             Height = 600;
+            Game.screenWidth = Width;
+            Game.screenHeight = Height;
             game = new Game();
             game.screen = new Surface(Width, Height);
             Sprite.target = game.screen;

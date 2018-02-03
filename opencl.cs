@@ -227,5 +227,8 @@ namespace Template {
         public void Execute(long[] workSize, long[] localSize) {
             queue.Execute(kernel, null, workSize, localSize, null);
         }
+        public void StopMaar() {
+            queue.Finish();
+        }
     }
 }

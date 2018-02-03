@@ -11,25 +11,51 @@ using OpenTK.Graphics.OpenGL;
 namespace Template {
 
     class Game {
+        public static int screenWidth, screenHeight;
         // when GLInterop is set to true, the fractal is rendered directly to an OpenGL texture
         bool GLInterop = false;
         // load the OpenCL program; this creates the OpenCL context
         static OpenCLProgram ocl = new OpenCLProgram("../../program.cl");
         // find the kernel named 'device_function' in the program
         OpenCLKernel kernel = new OpenCLKernel(ocl, "device_function");
+        OpenCLKernel swapper = new OpenCLKernel(ocl, "ruiltransactie");
+        uint[] pattern, second;
         // create a regular buffer; by default this resides on both the host and the device
-        OpenCLBuffer<uint> pattern = new OpenCLBuffer<uint>(ocl, 512 * 512);
-        OpenCLBuffer<uint> second = new OpenCLBuffer<uint>(ocl, 512 * 512);
+        OpenCLBuffer<uint> patternB;
+        OpenCLBuffer<uint> secondB;
+        OpenCLBuffer<uint> teken = new OpenCLBuffer<uint>(ocl, screenWidth * screenHeight);
         // create an OpenGL texture to which OpenCL can send data
-        OpenCLImage<int> image = new OpenCLImage<int>(ocl, 512, 512);
+        OpenCLImage<int> image = new OpenCLImage<int>(ocl, screenWidth, screenHeight);
+        OpenCLImage<int> image2 = new OpenCLImage<int>(ocl, screenWidth, screenHeight);
         public Surface screen;
         Stopwatch timer = new Stopwatch();
         uint pw, ph;
+        int generation = 0;
 
         // helper function for setting one bit in the pattern buffer
-        void BitSet(uint x, uint y) { pattern[(int)(y * pw + (x >> 5))] |= 1U << (int)(x & 31); }
-        // helper function for getting one bit from the secondary pattern buffer
-        uint GetBit(uint x, uint y) { return (second[(int)(y * pw + (x >> 5))] >> (int)(x & 31)) & 1U; }
+        void BitSet(uint x, uint y) { second[(int)(y * pw + (x >> 5))] |= 1U << (int)(x & 31); }
+
+        // mouse handling: dragging functionality
+        uint xoffset = 0, yoffset = 0;
+        bool lastLButtonState = false;
+        int dragXStart, dragYStart, offsetXStart, offsetYStart;
+        public void SetMouseState(int x, int y, bool pressed) {
+            if (pressed) {
+                if (lastLButtonState) {
+                    int deltax = x - dragXStart, deltay = y - dragYStart;
+                    xoffset = (uint)Math.Min(pw * 32 - screen.width, Math.Max(0, offsetXStart - deltax));
+                    yoffset = (uint)Math.Min(ph - screen.height, Math.Max(0, offsetYStart - deltay));
+                }
+                else {
+                    dragXStart = x;
+                    dragYStart = y;
+                    offsetXStart = (int)xoffset;
+                    offsetYStart = (int)yoffset;
+                    lastLButtonState = true;
+                }
+            }
+            else lastLButtonState = false;
+        }
 
         // minimalistic .rle file reader for Golly files (see http://golly.sourceforge.net)
         public void Init() {
@@ -44,8 +70,11 @@ namespace Template {
                     String[] sub = line.Split(new char[] { '=', ',' }, StringSplitOptions.RemoveEmptyEntries);
                     pw = (UInt32.Parse(sub[1]) + 31) / 32;
                     ph = UInt32.Parse(sub[3]);
+                    pattern = new uint[pw * ph];
+                    second = new uint[pw * ph];
                 }
-                else while (pos < line.Length) {
+                else {
+                    while (pos < line.Length) {
                         Char c = line[pos++];
                         if (state == 0) if (c < '0' || c > '9') { state = 1; n = Math.Max(n, 1); } else n = (uint)(n * 10 + (c - '0'));
                         if (state == 1) // expect other character
@@ -55,24 +84,45 @@ namespace Template {
                             state = n = 0;
                         }
                     }
+                }
             }
-            // swap buffers
-            for (int i = 0; i < pw * ph; i++) second[i] = pattern[i];
+            patternB = new OpenCLBuffer<uint>(ocl, pattern);
+            secondB = new OpenCLBuffer<uint>(ocl, second);
         }
         public void Tick() {
+            // start timer
+            timer.Restart();
             GL.Finish();
             // clear the screen
             screen.Clear(0);
             // do opencl stuff
-            if (GLInterop) kernel.SetArgument(0, image);
-            else {
-                kernel.SetArgument(0, pattern);
-                kernel.SetArgument(1, second);
+            if (GLInterop) {
+                kernel.SetArgument(0, image);
+                kernel.SetArgument(1, image2);
                 kernel.SetArgument(2, pw);
                 kernel.SetArgument(3, ph);
             }
+            else {
+                patternB.CopyFromDevice();
+                secondB.CopyFromDevice();
+                kernel.SetArgument(0, patternB);
+                kernel.SetArgument(1, secondB);
+                kernel.SetArgument(2, teken);
+                kernel.SetArgument(3, pw);
+                kernel.SetArgument(4, ph);
+                kernel.SetArgument(5, screenWidth);
+                kernel.SetArgument(6, screenHeight);
+                kernel.SetArgument(7, xoffset);
+                kernel.SetArgument(8, yoffset);
+                swapper.SetArgument(0, patternB);
+                swapper.SetArgument(1, secondB);
+                swapper.SetArgument(2, pw);
+                swapper.SetArgument(3, ph);
+                swapper.SetArgument(4, screenWidth);
+                swapper.SetArgument(5, screenHeight);
+            }
             // execute kernel
-            long[] workSize = { 512, 512 };
+            long[] workSize = { pw * 32, ph };
             long[] localSize = { 32, 4 };
             if (GLInterop) {
                 // INTEROP PATH:
@@ -93,17 +143,21 @@ namespace Template {
                 // is copied to the screen surface, so the template code can show
                 // it in the window.
                 // execute the kernel
-                kernel.Execute(workSize, localSize);
+                kernel.Execute(workSize, null );
+                kernel.StopMaar();
+                swapper.Execute(workSize, null );
+                //swapper.StopMaar();
                 // get the data from the device to the host
-                pattern.CopyFromDevice();
+                teken.CopyFromDevice();
                 // plot pixels using the data on the host
-                for (int y = 0; y < 512; y++) for (int x = 0; x < 512; x++) {
-                        screen.pixels[x + y * screen.width] = (int)pattern[(x + y * 512)];
+                for (int y = 0; y < screenHeight; y++) {
+                    for (int x = 0; x < screenWidth; x++) {
+                        screen.pixels[x + y * screenWidth] = (int)teken[(x + y * screenWidth)];
                     }
-
-                // swap buffers
-                for (int i = 0; i < pw * ph; i++) second[i] = pattern[i];
+                }
             }
+            // report performance
+            Console.WriteLine("generation " + generation++ + ": " + timer.ElapsedMilliseconds + "ms");
         }
         public void Render() {
             // use OpenGL to draw a quad using the texture that was filled by OpenCL
